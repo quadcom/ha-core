@@ -37,6 +37,18 @@ def async_sendspin_client_ids(hass: HomeAssistant) -> list[str]:
 
 
 @callback
+def async_sendspin_device_ids(hass: HomeAssistant) -> dict[str, str]:
+    """Return the device registry id of each tracked client id's device."""
+    device_ids: dict[str, str] = {}
+    for client_id in DomainData.get(hass).sendspin_client_ids:
+        if (entry_data := async_sendspin_entry_data(hass, client_id)) and (
+            device_id := entry_data.main_device_entry_id
+        ) is not None:
+            device_ids[client_id] = device_id
+    return device_ids
+
+
+@callback
 def async_subscribe_sendspin_clients(
     hass: HomeAssistant, subscriber: SendspinClientsCallback
 ) -> CALLBACK_TYPE:
