@@ -39,6 +39,7 @@ from homeassistant.components.esphome.websocket_api import (
     CLIENT_ID,
     CLIENT_IDS,
     DEVICE_ID,
+    DEVICES,
     ENTRY_ID,
     TYPE,
 )
@@ -837,13 +838,20 @@ async def _subscribe_sendspin_clients(
     return websocket_client, await _receive_sendspin_clients(websocket_client)
 
 
+async def _receive_sendspin_event(
+    websocket_client: MockHAClientWebSocket,
+) -> dict[str, Any]:
+    """Receive the next client snapshot event."""
+    message = await websocket_client.receive_json()
+    assert message["type"] == "event"
+    return message["event"]
+
+
 async def _receive_sendspin_clients(
     websocket_client: MockHAClientWebSocket,
 ) -> list[str]:
     """Receive the next client id snapshot."""
-    message = await websocket_client.receive_json()
-    assert message["type"] == "event"
-    return message["event"][CLIENT_IDS]
+    return (await _receive_sendspin_event(websocket_client))[CLIENT_IDS]
 
 
 async def _assert_nothing_received(websocket_client: MockHAClientWebSocket) -> None:
@@ -983,20 +991,54 @@ async def test_subscribe_sendspin_clients(
     mock_client: APIClient,
     mock_esphome_device: MockESPHomeDeviceType,
     hass_ws_client: WebSocketGenerator,
+    device_registry: dr.DeviceRegistry,
 ) -> None:
     """The client ids are sent on subscribe and whenever a device comes or goes."""
     device = await mock_esphome_device(
         mock_client=mock_client, device_capabilities=_sendspin_capabilities()
     )
+    device_id = _device_id_for_mac(device_registry, device.entry)
     websocket_client, client_ids = await _subscribe_sendspin_clients(hass_ws_client)
     assert client_ids == [SENDSPIN_CLIENT_ID]
 
     await device.mock_disconnect(False)
-    assert await _receive_sendspin_clients(websocket_client) == []
+    assert await _receive_sendspin_event(websocket_client) == {
+        CLIENT_IDS: [],
+        DEVICES: {},
+    }
 
     await device.mock_connect()
-    assert await _receive_sendspin_clients(websocket_client) == [SENDSPIN_CLIENT_ID]
+    assert await _receive_sendspin_event(websocket_client) == {
+        CLIENT_IDS: [SENDSPIN_CLIENT_ID],
+        DEVICES: {SENDSPIN_CLIENT_ID: device_id},
+    }
     await _assert_nothing_received(websocket_client)
+
+
+async def test_subscribe_sendspin_clients_new_device_has_device_id(
+    hass: HomeAssistant,
+    mock_client: APIClient,
+    mock_esphome_device: MockESPHomeDeviceType,
+    hass_ws_client: WebSocketGenerator,
+    device_registry: dr.DeviceRegistry,
+) -> None:
+    """The first event of a device that connects for the first time has its id."""
+    # The integration registers the command when it is set up
+    await mock_esphome_device(
+        mock_client=mock_client, device_capabilities=_sendspin_capabilities()
+    )
+    websocket_client, _ = await _subscribe_sendspin_clients(hass_ws_client)
+
+    new_device = await mock_esphome_device(
+        mock_client=mock_client,
+        device_info={"name": "other", "mac_address": "11:22:33:44:55:BB"},
+        device_capabilities=_sendspin_capabilities(client_id="other-client"),
+    )
+    event = await _receive_sendspin_event(websocket_client)
+    assert event[CLIENT_IDS] == sorted([SENDSPIN_CLIENT_ID, "other-client"])
+    assert event[DEVICES]["other-client"] == _device_id_for_mac(
+        device_registry, new_device.entry, "11:22:33:44:55:bb"
+    )
 
 
 @pytest.mark.parametrize(

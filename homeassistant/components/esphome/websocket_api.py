@@ -15,6 +15,7 @@ from .const import CONF_NOISE_PSK, DOMAIN
 from .entry_data import INFO_TYPE_TO_PLATFORM, ESPHomeConfigEntry, RuntimeEntryData
 from .sendspin import (
     async_sendspin_client_ids,
+    async_sendspin_device_ids,
     async_sendspin_entry_data,
     async_subscribe_sendspin_clients,
 )
@@ -25,6 +26,7 @@ ENTRY_ID = "entry_id"
 DEVICE_ID = "device_id"
 CLIENT_ID = "client_id"
 CLIENT_IDS = "client_ids"
+DEVICES = "devices"
 
 ZWAVE_JS_DOMAIN = "zwave_js"
 
@@ -271,13 +273,17 @@ def subscribe_sendspin_clients(
     """Stream the Sendspin client ids a pairing token can be fetched for.
 
     A Sendspin server (Music Assistant) gets the ids of the connected devices
-    right away and again whenever they change, and asks for a token with
+    right away and again whenever they change, together with the device
+    registry id of each one's device, and asks for a token with
     sendspin/get_pairing_token when one of them is a client it has not paired.
     """
 
     @callback
     def _send(client_ids: list[str]) -> None:
-        connection.send_event(msg["id"], {CLIENT_IDS: client_ids})
+        connection.send_event(
+            msg["id"],
+            {CLIENT_IDS: client_ids, DEVICES: async_sendspin_device_ids(hass)},
+        )
 
     connection.subscriptions[msg["id"]] = async_subscribe_sendspin_clients(hass, _send)
     connection.send_result(msg["id"])
